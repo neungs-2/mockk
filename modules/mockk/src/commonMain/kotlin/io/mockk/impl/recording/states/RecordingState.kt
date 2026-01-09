@@ -4,6 +4,7 @@ import io.mockk.Invocation
 import io.mockk.Matcher
 import io.mockk.MockKException
 import io.mockk.RecordedCall
+import io.mockk.core.ValueClassSupport.boxedClass
 import io.mockk.impl.InternalPlatform
 import io.mockk.impl.log.Logger
 import io.mockk.impl.recording.CallRound
@@ -92,12 +93,15 @@ abstract class RecordingState(
             isTemporaryMock = false
         }
 
-        builder().addSignedCall(
-            retValue,
-            isTemporaryMock,
-            retType,
-            invocation,
-        )
+        val previous = builder().signedCalls.lastOrNull()
+        if (!shouldSkipValueClassUnboxing(invocation, previous)) {
+            builder().addSignedCall(
+                retValue,
+                isTemporaryMock,
+                retType,
+                invocation,
+            )
+        }
 
         return retValue
     }
@@ -107,6 +111,51 @@ abstract class RecordingState(
         return matcher.self is Number &&
             matcher.method.name.endsWith("Value") &&
             matcher.method.paramTypes.isEmpty()
+    }
+
+    private fun shouldSkipValueClassUnboxing(
+        invocation: Invocation,
+        previous: io.mockk.impl.recording.SignedCall?,
+    ): Boolean {
+        if (previous == null) {
+            return false
+        }
+
+        val method = invocation.method
+        if (method.paramTypes.isNotEmpty() || !method.name.startsWith("get")) {
+            return false
+        }
+
+        val previousReturnType = previous.retType
+        val boxedReturnType = previousReturnType.boxedClass
+        if (previousReturnType == boxedReturnType) {
+            return false
+        }
+
+        if (!previous.isRetValueMock || previous.retValue !== invocation.self) {
+            return false
+        }
+
+        if (method.declaringClass != previousReturnType || method.returnType != boxedReturnType) {
+            return false
+        }
+
+        if (!previous.method.returnTypeNullable) {
+            return false
+        }
+
+        val stack =
+            try {
+                invocation.callStack()
+            } catch (_: Throwable) {
+                emptyList()
+            }
+
+        return stack.any { element ->
+            element.className == "io.mockk.core.ValueClassSupport" &&
+                (element.methodName.contains("boxedValue") ||
+                    element.methodName.contains("maybeUnboxValueForMethodReturn"))
+        }
     }
 
     private fun workaroundBoxedNumbers() {
