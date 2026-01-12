@@ -57,9 +57,14 @@ class JvmMockInitializer(
             }
         }
 
-        for (property in cls.memberProperties) {
-            property as KProperty1<Any, Any>
+        // Collect @InjectMockKs properties and sort by dependency order
+        val injectMockKsProperties = cls.memberProperties
+            .map { it as KProperty1<Any, Any> }
+            .filter { it.findAnnotation<InjectMockKs>() != null }
 
+        val sortedProperties = sortByDependencyOrder(injectMockKsProperties)
+
+        for (property in sortedProperties) {
             property.annotated<InjectMockKs>(target) { annotation ->
                 val mockInjector =
                     MockInjector(
@@ -71,6 +76,12 @@ class JvmMockInitializer(
                 val instance = doInjection(property, target, mockInjector)
                 convertSpyKAnnotatedToSpy(property, instance, overrideRecordPrivateCalls)
             }
+        }
+
+        // Process @OverrideMockKs separately (maintains original order)
+        for (property in cls.memberProperties) {
+            property as KProperty1<Any, Any>
+
             property.annotated<OverrideMockKs>(target) { annotation ->
                 val mockInjector =
                     MockInjector(
@@ -84,6 +95,82 @@ class JvmMockInitializer(
             }
         }
     }
+
+    /**
+     * Sorts @InjectMockKs properties by dependency order using topological sort.
+     * Properties with no dependencies on other @InjectMockKs types are processed first.
+     */
+    private fun sortByDependencyOrder(
+        properties: List<KProperty1<Any, Any>>,
+    ): List<KProperty1<Any, Any>> {
+        if (properties.size <= 1) return properties
+
+        // Map: KClass -> Property (for looking up which property provides which type)
+        val typeToProperty: Map<KClass<*>, KProperty1<Any, Any>> = properties
+            .mapNotNull { prop ->
+                val type = prop.returnType.classifier as? KClass<*>
+                type?.let { it to prop }
+            }
+            .toMap()
+
+        // Build dependency graph: property -> set of properties it depends on
+        val dependencies: Map<KProperty1<Any, Any>, Set<KProperty1<Any, Any>>> = properties
+            .associateWith { property ->
+                val clazz = property.returnType.classifier as? KClass<*>
+                    ?: return@associateWith emptySet()
+
+                // Get constructor parameters and find which ones are provided by other @InjectMockKs
+                getConstructorParameterTypes(clazz)
+                    .mapNotNull { paramType -> typeToProperty[paramType] }
+                    .toSet()
+            }
+
+        // Topological sort using Kahn's algorithm
+        val inDegree = properties.associateWith { prop ->
+            dependencies[prop]?.size ?: 0
+        }.toMutableMap()
+
+        val result = mutableListOf<KProperty1<Any, Any>>()
+        val queue = ArrayDeque(properties.filter { inDegree[it] == 0 })
+
+        while (queue.isNotEmpty()) {
+            val current = queue.removeFirst()
+            result.add(current)
+
+            // Decrease in-degree for properties that depend on current
+            for (prop in properties) {
+                if (dependencies[prop]?.contains(current) == true) {
+                    val newDegree = (inDegree[prop] ?: 1) - 1
+                    inDegree[prop] = newDegree
+                    if (newDegree == 0) {
+                        queue.add(prop)
+                    }
+                }
+            }
+        }
+
+        // Check for circular dependencies
+        if (result.size != properties.size) {
+            val circular = properties.filter { it !in result }
+            throw MockKException(
+                "Circular dependency detected in @InjectMockKs: ${circular.map { it.name }}",
+            )
+        }
+
+        return result
+    }
+
+    /**
+     * Gets all parameter types from all constructors of a class.
+     */
+    private fun getConstructorParameterTypes(clazz: KClass<*>): Set<KClass<*>> =
+        clazz.constructors
+            .flatMap { constructor ->
+                constructor.parameters.mapNotNull { param ->
+                    param.type.classifier as? KClass<*>
+                }
+            }
+            .toSet()
 
     private fun doInjection(
         property: KProperty1<out Any, Any?>,
