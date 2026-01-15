@@ -4,7 +4,9 @@ package io.mockk.impl.annotations
 
 import io.mockk.MockKException
 import io.mockk.MockKGateway
+import io.mockk.impl.annotations.InjectionHelpers.getConstructorParameterTypes
 import io.mockk.impl.annotations.InjectionHelpers.getAnyIfLateNull
+import io.mockk.impl.annotations.InjectionHelpers.getReturnTypeKClass
 import kotlin.reflect.KClass
 import kotlin.reflect.KMutableProperty1
 import kotlin.reflect.KProperty
@@ -105,27 +107,34 @@ class JvmMockInitializer(
     ): List<KProperty1<Any, Any>> {
         if (properties.size <= 1) return properties
 
-        // Map: KClass -> Property (for looking up which property provides which type)
-        val typeToProperty: Map<KClass<*>, KProperty1<Any, Any>> = properties
-            .mapNotNull { prop ->
-                val type = prop.returnType.classifier as? KClass<*>
-                type?.let { it to prop }
-            }
+        val dependencies = buildDependencyGraph(properties)
+        return topologicalSort(properties, dependencies)
+    }
+
+    private fun buildDependencyGraph(
+        properties: List<KProperty1<Any, Any>>,
+    ): Map<KProperty1<Any, Any>, Set<KProperty1<Any, Any>>> {
+        val typeToProperty = properties
+            .mapNotNull { prop -> prop.getReturnTypeKClass()?.let { it to prop } }
             .toMap()
 
-        // Build dependency graph: property -> set of properties it depends on
-        val dependencies: Map<KProperty1<Any, Any>, Set<KProperty1<Any, Any>>> = properties
-            .associateWith { property ->
-                val clazz = property.returnType.classifier as? KClass<*>
-                    ?: return@associateWith emptySet()
+        return properties.associateWith { property ->
+            val clazz = property.getReturnTypeKClass() ?: return@associateWith emptySet()
 
-                // Get constructor parameters and find which ones are provided by other @InjectMockKs
-                getConstructorParameterTypes(clazz)
-                    .mapNotNull { paramType -> typeToProperty[paramType] }
-                    .toSet()
-            }
+            clazz.getConstructorParameterTypes()
+                .mapNotNull { paramType -> typeToProperty[paramType] }
+                .toSet()
+        }
+    }
 
-        // Topological sort using Kahn's algorithm
+    /**
+     * Performs topological sort using Kahn's algorithm.
+     * @throws MockKException if circular dependency is detected.
+     */
+    private fun topologicalSort(
+        properties: List<KProperty1<Any, Any>>,
+        dependencies: Map<KProperty1<Any, Any>, Set<KProperty1<Any, Any>>>,
+    ): List<KProperty1<Any, Any>> {
         val inDegree = properties.associateWith { prop ->
             dependencies[prop]?.size ?: 0
         }.toMutableMap()
@@ -137,10 +146,9 @@ class JvmMockInitializer(
             val current = queue.removeFirst()
             result.add(current)
 
-            // Decrease in-degree for properties that depend on current
             for (prop in properties) {
                 if (dependencies[prop]?.contains(current) == true) {
-                    val newDegree = (inDegree[prop] ?: 1) - 1
+                    val newDegree = inDegree.getValue(prop) - 1
                     inDegree[prop] = newDegree
                     if (newDegree == 0) {
                         queue.add(prop)
@@ -149,7 +157,6 @@ class JvmMockInitializer(
             }
         }
 
-        // Check for circular dependencies
         if (result.size != properties.size) {
             val circular = properties.filter { it !in result }
             throw MockKException(
@@ -159,18 +166,6 @@ class JvmMockInitializer(
 
         return result
     }
-
-    /**
-     * Gets all parameter types from all constructors of a class.
-     */
-    private fun getConstructorParameterTypes(clazz: KClass<*>): Set<KClass<*>> =
-        clazz.constructors
-            .flatMap { constructor ->
-                constructor.parameters.mapNotNull { param ->
-                    param.type.classifier as? KClass<*>
-                }
-            }
-            .toSet()
 
     private fun doInjection(
         property: KProperty1<out Any, Any?>,
@@ -233,9 +228,7 @@ class JvmMockInitializer(
         target: Any,
     ) {
         property.annotated<RelaxedMockK>(target) { annotation ->
-            val type =
-                property.returnType.classifier as? KClass<*>
-                    ?: return@annotated null
+            val type = property.getReturnTypeKClass() ?: return@annotated null
 
             gateway.mockFactory.mockk(
                 type,
@@ -254,9 +247,7 @@ class JvmMockInitializer(
         relaxed: Boolean,
     ) {
         property.annotated<MockK>(target) { annotation ->
-            val type =
-                property.returnType.classifier as? KClass<*>
-                    ?: return@annotated null
+            val type = property.getReturnTypeKClass() ?: return@annotated null
 
             gateway.mockFactory.mockk(
                 type,
