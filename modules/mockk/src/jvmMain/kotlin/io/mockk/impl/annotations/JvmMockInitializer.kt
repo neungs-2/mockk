@@ -4,8 +4,8 @@ package io.mockk.impl.annotations
 
 import io.mockk.MockKException
 import io.mockk.MockKGateway
-import io.mockk.impl.annotations.InjectionHelpers.getConstructorParameterTypes
 import io.mockk.impl.annotations.InjectionHelpers.getAnyIfLateNull
+import io.mockk.impl.annotations.InjectionHelpers.getConstructorParameterTypes
 import io.mockk.impl.annotations.InjectionHelpers.getReturnTypeKClass
 import kotlin.reflect.KClass
 import kotlin.reflect.KMutableProperty1
@@ -60,9 +60,10 @@ class JvmMockInitializer(
         }
 
         // Collect @InjectMockKs properties and sort by dependency order
-        val injectMockKsProperties = cls.memberProperties
-            .map { it as KProperty1<Any, Any> }
-            .filter { it.findAnnotation<InjectMockKs>() != null }
+        val injectMockKsProperties =
+            cls.memberProperties
+                .map { it as KProperty1<Any, Any> }
+                .filter { it.findAnnotation<InjectMockKs>() != null }
 
         val sortedProperties = sortByDependencyOrder(injectMockKsProperties)
 
@@ -102,26 +103,24 @@ class JvmMockInitializer(
      * Sorts @InjectMockKs properties by dependency order using topological sort.
      * Properties with no dependencies on other @InjectMockKs types are processed first.
      */
-    private fun sortByDependencyOrder(
-        properties: List<KProperty1<Any, Any>>,
-    ): List<KProperty1<Any, Any>> {
+    private fun sortByDependencyOrder(properties: List<KProperty1<Any, Any>>): List<KProperty1<Any, Any>> {
         if (properties.size <= 1) return properties
 
         val dependencies = buildDependencyGraph(properties)
         return topologicalSort(properties, dependencies)
     }
 
-    private fun buildDependencyGraph(
-        properties: List<KProperty1<Any, Any>>,
-    ): Map<KProperty1<Any, Any>, Set<KProperty1<Any, Any>>> {
-        val typeToProperty = properties
-            .mapNotNull { prop -> prop.getReturnTypeKClass()?.let { it to prop } }
-            .toMap()
+    private fun buildDependencyGraph(properties: List<KProperty1<Any, Any>>): Map<KProperty1<Any, Any>, Set<KProperty1<Any, Any>>> {
+        val typeToProperty =
+            properties
+                .mapNotNull { prop -> prop.getReturnTypeKClass()?.let { it to prop } }
+                .toMap()
 
         return properties.associateWith { property ->
             val clazz = property.getReturnTypeKClass() ?: return@associateWith emptySet()
 
-            clazz.getConstructorParameterTypes()
+            clazz
+                .getConstructorParameterTypes()
                 .mapNotNull { paramType -> typeToProperty[paramType] }
                 .toSet()
         }
@@ -135,9 +134,11 @@ class JvmMockInitializer(
         properties: List<KProperty1<Any, Any>>,
         dependencies: Map<KProperty1<Any, Any>, Set<KProperty1<Any, Any>>>,
     ): List<KProperty1<Any, Any>> {
-        val inDegree = properties.associateWith { prop ->
-            dependencies[prop]?.size ?: 0
-        }.toMutableMap()
+        val inDegree =
+            properties
+                .associateWith { prop ->
+                    dependencies[prop]?.size ?: 0
+                }.toMutableMap()
 
         val result = mutableListOf<KProperty1<Any, Any>>()
         val queue = ArrayDeque(properties.filter { inDegree[it] == 0 })

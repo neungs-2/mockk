@@ -60,19 +60,13 @@ internal object InjectionHelpers {
         javaField.set(obj, value)
     }
 
-    fun KProperty<*>.getReturnTypeKClass(): KClass<*>? {
-        return returnType.classifier as? KClass<*>
-    }
+    fun KProperty<*>.getReturnTypeKClass(): KClass<*>? = returnType.classifier as? KClass<*>
 
-    fun KType.getKClass(): KClass<*>? {
-        return classifier as? KClass<*>
-    }
+    fun KType.getKClass(): KClass<*>? = classifier as? KClass<*>
 
-    fun KClass<*>.getConstructorParameterTypes(): Set<KClass<*>> {
-        return constructors
+    fun KClass<*>.getConstructorParameterTypes(): Set<KClass<*>> =
+        constructors
             .flatMap { constructor ->
                 constructor.parameters.mapNotNull { it.type.getKClass() }
-            }
-            .toSet()
-    }
+            }.toSet()
 }

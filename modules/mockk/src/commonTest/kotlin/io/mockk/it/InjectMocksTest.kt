@@ -99,7 +99,6 @@ class InjectMocksListTest {
  * Solution: Use topological sort to resolve dependencies in correct order.
  */
 class InjectMocksDependencyOrderTest {
-
     // ========== Domain Classes ==========
 
     interface Repository {
@@ -107,23 +106,53 @@ class InjectMocksDependencyOrderTest {
     }
 
     // Two-level: A depends on B
-    class ServiceB(val repository: Repository)
-    class ServiceA(val b: ServiceB)
+    class ServiceB(
+        val repository: Repository,
+    )
+
+    class ServiceA(
+        val b: ServiceB,
+    )
 
     // Three-level chain: A -> B -> C (reverse alphabetical)
-    class LevelC(val repository: Repository)
-    class LevelB(val c: LevelC)
-    class LevelA(val b: LevelB)
+    class LevelC(
+        val repository: Repository,
+    )
+
+    class LevelB(
+        val c: LevelC,
+    )
+
+    class LevelA(
+        val b: LevelB,
+    )
 
     // Diamond dependency: D -> (B, C), B -> A, C -> A
-    class DiamondA(val repository: Repository)
-    class DiamondB(val a: DiamondA)
-    class DiamondC(val a: DiamondA)
-    class DiamondD(val b: DiamondB, val c: DiamondC)
+    class DiamondA(
+        val repository: Repository,
+    )
+
+    class DiamondB(
+        val a: DiamondA,
+    )
+
+    class DiamondC(
+        val a: DiamondA,
+    )
+
+    class DiamondD(
+        val b: DiamondB,
+        val c: DiamondC,
+    )
 
     // Circular dependency (intentionally no "Circular" in class name for test accuracy)
-    class NodeX(val y: NodeY)
-    class NodeY(val x: NodeX)
+    class NodeX(
+        val y: NodeY,
+    )
+
+    class NodeY(
+        val x: NodeX,
+    )
 
     // ========== Test 1: Two-level dependency ==========
 
@@ -132,7 +161,7 @@ class InjectMocksDependencyOrderTest {
         lateinit var repository: Repository
 
         @InjectMockKs
-        lateinit var a: ServiceA  // Depends on B
+        lateinit var a: ServiceA // Depends on B
 
         @InjectMockKs
         lateinit var b: ServiceB
@@ -155,13 +184,13 @@ class InjectMocksDependencyOrderTest {
         lateinit var repository: Repository
 
         @InjectMockKs
-        lateinit var a: LevelA  // Depends on B
+        lateinit var a: LevelA // Depends on B
 
         @InjectMockKs
-        lateinit var b: LevelB  // Depends on C
+        lateinit var b: LevelB // Depends on C
 
         @InjectMockKs
-        lateinit var c: LevelC  // Independent (only needs @MockK)
+        lateinit var c: LevelC // Independent (only needs @MockK)
     }
 
     @Test
@@ -183,16 +212,16 @@ class InjectMocksDependencyOrderTest {
         lateinit var repository: Repository
 
         @InjectMockKs
-        lateinit var alpha: DiamondD  // 'alpha' is first, but needs beta & gamma
+        lateinit var alpha: DiamondD // 'alpha' is first, but needs beta & gamma
 
         @InjectMockKs
-        lateinit var beta: DiamondB   // Needs zeta
+        lateinit var beta: DiamondB // Needs zeta
 
         @InjectMockKs
-        lateinit var gamma: DiamondC  // Needs zeta
+        lateinit var gamma: DiamondC // Needs zeta
 
         @InjectMockKs
-        lateinit var zeta: DiamondA   // 'zeta' is last, but is independent (leaf)
+        lateinit var zeta: DiamondA // 'zeta' is last, but is independent (leaf)
     }
 
     @Test
@@ -213,15 +242,20 @@ class InjectMocksDependencyOrderTest {
 
     // ========== Test 4: Misleading names ==========
 
-    class ServiceZ(val repository: Repository)
-    class ServiceY(val z: ServiceZ)
+    class ServiceZ(
+        val repository: Repository,
+    )
+
+    class ServiceY(
+        val z: ServiceZ,
+    )
 
     class MisleadingNamesTestTarget {
         @MockK
         lateinit var repository: Repository
 
         @InjectMockKs
-        lateinit var serviceY: ServiceY  // 'serviceY' < 'serviceZ', but Y depends on Z
+        lateinit var serviceY: ServiceY // 'serviceY' < 'serviceZ', but Y depends on Z
 
         @InjectMockKs
         lateinit var serviceZ: ServiceZ
@@ -251,13 +285,14 @@ class InjectMocksDependencyOrderTest {
     fun circularDependencyDetection() {
         val obj = CircularTestTarget()
 
-        val exception = kotlin.test.assertFailsWith<io.mockk.MockKException> {
-            MockKAnnotations.init(obj)
-        }
+        val exception =
+            kotlin.test.assertFailsWith<io.mockk.MockKException> {
+                MockKAnnotations.init(obj)
+            }
 
         kotlin.test.assertTrue(
             exception.message?.contains("Circular") == true,
-            "Error should mention 'Circular', but was: ${exception.message}"
+            "Error should mention 'Circular', but was: ${exception.message}",
         )
     }
 }
